@@ -12,7 +12,7 @@ import warnings
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
 
-# Set style for visualizations (updated to use current seaborn style)
+# Set style for visualizations
 sns.set_style("whitegrid")
 sns.set_palette("husl")
 
@@ -293,7 +293,9 @@ class PortfolioAnalyzer:
             'Scenario': results.keys(),
             'Expected Impact (%)': [r['total_impact']*100 for r in results.values()]
         })
-        print(scenario_df.to_markdown(index=False))
+        
+        # Use pandas to_string() instead of to_markdown() to avoid tabulate dependency
+        print(scenario_df.to_string(index=False))
         
         self.visualize_results(results)
 
@@ -392,7 +394,7 @@ def create_interactive_dashboard(clients):
             # Show breakdown
             print("\nAsset-level Impact:")
             breakdown_df = pd.DataFrame.from_dict(result['breakdown'], orient='index')
-            print(breakdown_df[['allocation', 'sensitivity', 'impact']].sort_values('impact').to_markdown())
+            print(breakdown_df[['allocation', 'sensitivity', 'impact']].sort_values('impact').to_string())
             
             # Plot scenario path
             plt.figure(figsize=(10, 4))
