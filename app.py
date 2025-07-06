@@ -7,9 +7,13 @@ import requests
 from datetime import datetime, timedelta
 import ipywidgets as widgets
 from IPython.display import display
+import warnings
 
-# Set style for visualizations
-plt.style.use('seaborn')
+# Suppress warnings for cleaner output
+warnings.filterwarnings('ignore')
+
+# Set style for visualizations (updated to use current seaborn style)
+sns.set_style("whitegrid")
 sns.set_palette("husl")
 
 ## 1. Data Collection Functions
@@ -40,7 +44,10 @@ def fetch_current_prices(assets):
     # Fetch equity prices
     equity_tickers = [ticker_map[a] for a in assets if a in ticker_map]
     if equity_tickers:
-        equity_data = yf.download(equity_tickers, period="1d")['Adj Close']
+        try:
+            equity_data = yf.download(equity_tickers, period="1d")['Adj Close']
+        except:
+            equity_data = pd.DataFrame()
     else:
         equity_data = pd.DataFrame()
     
@@ -61,10 +68,13 @@ def fetch_current_prices(assets):
                 current_prices[asset] = equity_data[ticker].iloc[-1]
             else:
                 # Fallback to last known price if today's data unavailable
-                hist_data = yf.Ticker(ticker).history(period="1mo")
-                if not hist_data.empty:
-                    current_prices[asset] = hist_data['Adj Close'].iloc[-1]
-                else:
+                try:
+                    hist_data = yf.Ticker(ticker).history(period="1mo")
+                    if not hist_data.empty:
+                        current_prices[asset] = hist_data['Adj Close'].iloc[-1]
+                    else:
+                        current_prices[asset] = np.nan
+                except:
                     current_prices[asset] = np.nan
         
         elif asset in mf_category_map:
@@ -93,14 +103,17 @@ class PortfolioAnalyzer:
         
     def _parse_portfolio(self):
         """Parse the client's portfolio into a structured format"""
-        equity_holdings = [x.strip() for x in self.client_data["Equity Portfolio (Stocks, ETFs)"].split(",")]
-        mf_holdings = [x.strip() for x in self.client_data["Mutual Fund Holdings"].split(",")]
+        try:
+            equity_holdings = [x.strip() for x in self.client_data["Equity Portfolio (Stocks, ETFs)"].split(",")]
+            mf_holdings = [x.strip() for x in self.client_data["Mutual Fund Holdings"].split(",")]
+        except:
+            equity_holdings = []
+            mf_holdings = []
         
         # For demo purposes, assume equal allocation between equity and MF
-        # In practice, you'd use actual allocation percentages
         portfolio = {}
-        n_equity = len(equity_holdings)
-        n_mf = len(mf_holdings)
+        n_equity = max(len(equity_holdings), 1)  # Avoid division by zero
+        n_mf = max(len(mf_holdings), 1)
         
         for asset in equity_holdings:
             portfolio[asset] = {'type': 'equity', 'allocation': 0.5/n_equity}
@@ -116,7 +129,11 @@ class PortfolioAnalyzer:
         self.current_prices = fetch_current_prices(assets)
         
         # Calculate current values
-        total_value = self.client_data["Total Portfolio Size (in lakhs)"] * 100000  # Convert to rupees
+        try:
+            total_value = float(self.client_data["Total Portfolio Size (in lakhs)"]) * 100000  # Convert to rupees
+        except:
+            total_value = 0
+        
         for asset, data in self.portfolio.items():
             if asset in self.current_prices and not np.isnan(self.current_prices[asset]):
                 data['current_price'] = self.current_prices[asset]
@@ -176,7 +193,11 @@ class PortfolioAnalyzer:
     
     def calculate_portfolio_impact(self, inflation_scenario, horizon="short_term"):
         """Calculate portfolio impact for a given inflation scenario"""
-        avg_inflation_change = np.mean(inflation_scenario) - self.current_inflation
+        try:
+            avg_inflation_change = np.mean(inflation_scenario) - self.current_inflation
+        except:
+            avg_inflation_change = 0
+            
         total_impact = 0
         breakdown = {}
         
@@ -283,7 +304,7 @@ def fetch_financial_news():
     try:
         # This is a placeholder - replace with your actual news API call
         url = "https://service.upstox.com/content/open/v5/news/sub-category/news/list//market-news/stocks?page=1&pageSize=500"
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -297,7 +318,11 @@ def fetch_financial_news():
     
     except Exception as e:
         print(f"Error fetching news: {e}")
-        return []
+        return [{
+            'title': "Error Loading News",
+            'summary': "Could not fetch real news data",
+            'sentiment': 'neutral'
+        }]
 
 def adjust_sensitivities_based_on_news(sensitivities, news_articles):
     """Adjust asset sensitivities based on news sentiment"""
@@ -353,7 +378,8 @@ def create_interactive_dashboard(clients):
                 print(f"- {article['title']} ({article['sentiment']})")
             
             # Run analysis
-            scenario = analyzer.generate_inflation_scenarios()[scenario_dropdown.value + ' (0.3% monthly)']
+            scenario_name = f"{scenario_dropdown.value} (0.3% monthly)" if "Increase" in scenario_dropdown.value or "Decrease" in scenario_dropdown.value else scenario_dropdown.value
+            scenario = analyzer.generate_inflation_scenarios()[scenario_name]
             result = analyzer.calculate_portfolio_impact(scenario, horizon_radio.value)
             
             # Display results
@@ -378,9 +404,8 @@ def create_interactive_dashboard(clients):
             plt.show()
     
     # Set up observers
-    client_dropdown.observe(update_analysis, names='value')
-    horizon_radio.observe(update_analysis, names='value')
-    scenario_dropdown.observe(update_analysis, names='value')
+    for widget in [client_dropdown, horizon_radio, scenario_dropdown]:
+        widget.observe(update_analysis, names='value')
     
     # Initial update
     update_analysis(None)
@@ -391,7 +416,7 @@ def create_interactive_dashboard(clients):
 ## 5. Example Usage
 
 if __name__ == "__main__":
-    # Example client data (using the first client from your list)
+    # Example client data
     example_client = {
       "Client Name": "Sneha Sharma",
       "Email ID": "sneha.sharma@example.com",
@@ -407,5 +432,7 @@ if __name__ == "__main__":
     analyzer = PortfolioAnalyzer(example_client)
     analyzer.generate_report()
     
-    # For interactive dashboard with multiple clients:
-    # create_interactive_dashboard(clients_data)  # Pass your full clients list here
+    # For interactive dashboard with multiple clients
+    # Uncomment below and pass your full clients list
+    # clients_data = [...]  # Your full list of clients
+    # create_interactive_dashboard(clients_data)
